@@ -1,0 +1,506 @@
+{
+  "视觉语言动作模型": [
+    "vla",
+    "vision-language-action",
+    "openvla",
+    "rt-2",
+    "pi0",
+    "octo policy"
+  ],
+  "世界动作模型": [
+    "world action model",
+    "action-conditioned world model",
+    "latent action model",
+    "video prediction",
+    "future frame prediction",
+    "world model planning"
+  ],
+  "模仿学习与示教": [
+    "imitation learning",
+    "behavior cloning",
+    "learning from demonstrations",
+    "demonstration collection",
+    "dagger",
+    "robomimic"
+  ],
+  "技能学习与组合": [
+    "skill learning",
+    "skill chaining",
+    "skill composition",
+    "hierarchical skills",
+    "options framework",
+    "behavior trees"
+  ],
+  "具身智能体": [
+    "embodied agent",
+    "embodied reasoning",
+    "interactive embodied agent",
+    "embodied instruction following",
+    "embodied question answering",
+    "embodied planning"
+  ],
+  "具身任务评测": [
+    "embodied benchmark",
+    "habitat challenge",
+    "embodied task evaluation",
+    "objectnav",
+    "eqa benchmark",
+    "alfred benchmark"
+  ],
+  "人形机器人": [
+    "humanoid",
+    "bipedal humanoid",
+    "humanoid locomotion",
+    "humanoid manipulation",
+    "atlas humanoid",
+    "unitree g1"
+  ],
+  "四足机器人": [
+    "quadruped",
+    "robot dog",
+    "anymal",
+    "go2 quadruped",
+    "spot quadruped",
+    "quadrupedal locomotion"
+  ],
+  "移动与飞行平台": [
+    "mobile base",
+    "differential drive",
+    "omnidirectional drive",
+    "quadcopter",
+    "uav",
+    "px4"
+  ],
+  "机械臂与灵巧手": [
+    "robot arm",
+    "dexterous hand",
+    "end effector",
+    "gripper",
+    "franka panda",
+    "allegro hand"
+  ],
+  "机器人创客平台": [
+    "arduino robotics",
+    "esp32 robotics",
+    "open source robot kit",
+    "rosbot",
+    "petoi",
+    "maker robot"
+  ],
+  "传感器与执行器": [
+    "imu",
+    "lidar sensor",
+    "force torque sensor",
+    "motor driver",
+    "servo actuator",
+    "rotary encoder"
+  ],
+  "3D打印与数控制造": [
+    "3d printing",
+    "fdm",
+    "gcode",
+    "slicer",
+    "cnc",
+    "grbl"
+  ],
+  "运动规划": [
+    "motion planning",
+    "ompl",
+    "moveit",
+    "rrt",
+    "prm",
+    "trajopt"
+  ],
+  "模型预测控制": [
+    "mpc",
+    "model predictive control",
+    "acados",
+    "do-mpc",
+    "receding horizon control",
+    "nonlinear mpc"
+  ],
+  "全身控制与动力学": [
+    "whole-body control",
+    "wbc",
+    "inverse dynamics",
+    "tsid",
+    "centroidal dynamics",
+    "whole-body qp"
+  ],
+  "足式运动": [
+    "legged locomotion",
+    "gait generation",
+    "footstep planning",
+    "legged gym",
+    "rough terrain locomotion",
+    "stance control"
+  ],
+  "操作与接触控制": [
+    "contact-rich manipulation",
+    "impedance control",
+    "admittance control",
+    "force control",
+    "tactile manipulation",
+    "grasp control"
+  ],
+  "遥操作与人机交互": [
+    "teleoperation",
+    "teleop",
+    "haptic feedback",
+    "vr control",
+    "hand tracking",
+    "shared autonomy"
+  ],
+  "视觉SLAM": [
+    "visual slam",
+    "vslam",
+    "orb-slam",
+    "dso",
+    "svo",
+    "visual odometry"
+  ],
+  "激光与惯性SLAM": [
+    "lidar-inertial odometry",
+    "lio-sam",
+    "fast-lio",
+    "loam",
+    "lidar slam",
+    "lidar odometry"
+  ],
+  "多传感器融合定位": [
+    "sensor fusion localization",
+    "gnss-ins",
+    "visual-inertial odometry",
+    "msckf",
+    "robot_localization",
+    "ekf localization"
+  ],
+  "地图构建与重定位": [
+    "loop closure",
+    "place recognition",
+    "relocalization",
+    "occupancy mapping",
+    "pose graph optimization",
+    "maplab"
+  ],
+  "自主导航与避障": [
+    "nav2",
+    "costmap",
+    "dynamic obstacle avoidance",
+    "local navigation",
+    "dwa planner",
+    "teb planner"
+  ],
+  "探索与路径规划": [
+    "frontier exploration",
+    "next best view",
+    "coverage path planning",
+    "informative path planning",
+    "a star search",
+    "exploration planning"
+  ],
+  "策略优化与强化学习": [
+    "ppo",
+    "sac",
+    "td3",
+    "trpo",
+    "policy gradient",
+    "actor-critic"
+  ],
+  "离线强化学习": [
+    "offline rl",
+    "batch reinforcement learning",
+    "cql",
+    "iql",
+    "decision transformer",
+    "d4rl"
+  ],
+  "多智能体学习": [
+    "multi-agent reinforcement learning",
+    "marl",
+    "mappo",
+    "qmix",
+    "maddpg",
+    "pettingzoo"
+  ],
+  "基于模型的强化学习": [
+    "model-based reinforcement learning",
+    "mbrl",
+    "dreamer",
+    "mbpo",
+    "planet rl",
+    "learned dynamics"
+  ],
+  "强化学习训练系统": [
+    "rllib",
+    "stable-baselines3",
+    "sample factory",
+    "cleanrl",
+    "rl rollout",
+    "parallel environment"
+  ],
+  "仿真到现实迁移": [
+    "sim-to-real",
+    "sim2real",
+    "reality gap",
+    "sim-to-real transfer",
+    "privileged learning",
+    "teacher student policy"
+  ],
+  "MuJoCo与物理引擎": [
+    "mujoco",
+    "dm_control",
+    "pybullet",
+    "bullet physics",
+    "physx",
+    "brax"
+  ],
+  "Isaac与Genesis": [
+    "isaac sim",
+    "isaac lab",
+    "isaac gym",
+    "omniverse isaac",
+    "genesis simulator",
+    "genesis physics"
+  ],
+  "刚体动力学": [
+    "rigid body dynamics",
+    "featherstone algorithm",
+    "articulated body algorithm",
+    "rbdl",
+    "spatial algebra",
+    "forward dynamics"
+  ],
+  "可微物理与系统辨识": [
+    "differentiable physics",
+    "differentiable simulation",
+    "system identification",
+    "diffsim",
+    "diff taichi",
+    "physics parameter estimation"
+  ],
+  "场景资产与OpenUSD": [
+    "openusd",
+    "usd stage",
+    "usdview",
+    "usd asset",
+    "scene graph",
+    "asset pipeline"
+  ],
+  "合成数据与域随机化": [
+    "synthetic data generation",
+    "domain randomization",
+    "procedural scene generation",
+    "blenderproc",
+    "isaac replicator",
+    "synthetic annotation"
+  ],
+  "自动驾驶与飞行仿真": [
+    "carla",
+    "airsim",
+    "sumo traffic",
+    "driving simulator",
+    "flight simulator",
+    "autonomous driving simulation"
+  ],
+  "点云处理": [
+    "point cloud processing",
+    "pcl",
+    "open3d",
+    "point cloud registration",
+    "pointnet",
+    "point cloud segmentation"
+  ],
+  "三维重建与3DGS": [
+    "3d gaussian splatting",
+    "3dgs",
+    "gsplat",
+    "nerf",
+    "instant-ngp",
+    "novel view synthesis"
+  ],
+  "多视图几何与深度估计": [
+    "multi-view stereo",
+    "mvs",
+    "depth estimation",
+    "stereo matching",
+    "epipolar geometry",
+    "colmap"
+  ],
+  "三维生成与人体建模": [
+    "text-to-3d",
+    "mesh generation",
+    "smpl",
+    "human mesh recovery",
+    "avatar generation",
+    "human pose estimation"
+  ],
+  "实时渲染与光线追踪": [
+    "ray tracing",
+    "path tracing",
+    "vulkan ray tracing",
+    "optix",
+    "real-time rendering",
+    "rasterization"
+  ],
+  "科学可视化与VTK": [
+    "vtk",
+    "paraview",
+    "pyvista",
+    "scientific visualization",
+    "volume rendering",
+    "unstructured grid"
+  ],
+  "大模型训练与微调": [
+    "lora",
+    "qlora",
+    "peft",
+    "supervised fine-tuning",
+    "llama-factory",
+    "axolotl"
+  ],
+  "多模态模型": [
+    "vision-language model",
+    "vlm",
+    "image-text",
+    "clip",
+    "llava",
+    "qwen-vl"
+  ],
+  "视频与动作生成": [
+    "text-to-video",
+    "video diffusion",
+    "motion diffusion",
+    "animatediff",
+    "human motion generation",
+    "video generation"
+  ],
+  "智能体框架与工具调用": [
+    "function calling",
+    "tool calling",
+    "model context protocol",
+    "mcp server",
+    "autogen",
+    "crewai"
+  ],
+  "内容生成与知识管理": [
+    "knowledge base",
+    "note taking",
+    "markdown editor",
+    "wiki engine",
+    "obsidian plugin",
+    "content management"
+  ],
+  "检索与向量数据库": [
+    "rag",
+    "vector database",
+    "faiss",
+    "milvus",
+    "embedding retrieval",
+    "hnsw"
+  ],
+  "推理加速与服务": [
+    "vllm",
+    "sglang",
+    "tensorrt-llm",
+    "llm serving",
+    "pagedattention",
+    "continuous batching"
+  ],
+  "编译器与LLVM": [
+    "llvm",
+    "mlir",
+    "clang",
+    "compiler pass",
+    "intermediate representation",
+    "code generation"
+  ],
+  "GPU内核与异构计算": [
+    "cuda kernel",
+    "triton kernel",
+    "opencl",
+    "hip kernel",
+    "sycl",
+    "heterogeneous computing"
+  ],
+  "JAX与可微编程": [
+    "jax",
+    "flax",
+    "equinox",
+    "optax",
+    "jax jit",
+    "automatic differentiation"
+  ],
+  "模型压缩与部署": [
+    "quantization",
+    "pruning",
+    "knowledge distillation",
+    "gguf",
+    "weight compression",
+    "onnx export"
+  ],
+  "边缘推理与机器人部署": [
+    "jetson",
+    "nvidia orin",
+    "edge inference",
+    "on-device inference",
+    "tensorrt deployment",
+    "embedded robotics"
+  ],
+  "分布式训练与调度": [
+    "fsdp",
+    "deepspeed",
+    "megatron-lm",
+    "ray train",
+    "torch distributed",
+    "slurm"
+  ],
+  "ROS2系统集成": [
+    "ros2",
+    "rclcpp",
+    "rclpy",
+    "colcon",
+    "ros2 control",
+    "dds middleware"
+  ],
+  "数据集与数据管理": [
+    "dataset curation",
+    "dataset versioning",
+    "data annotation",
+    "datumaro",
+    "fiftyone",
+    "dvc"
+  ],
+  "评测基准与复现": [
+    "benchmark suite",
+    "evaluation harness",
+    "leaderboard",
+    "reproducibility",
+    "replication study",
+    "benchmark results"
+  ],
+  "CAD与机器人建模": [
+    "cadquery",
+    "freecad",
+    "onshape",
+    "urdf",
+    "xacro",
+    "robot description"
+  ],
+  "开发工具与自动化": [
+    "github actions",
+    "pre-commit",
+    "devcontainer",
+    "build automation",
+    "cli tooling",
+    "code generation"
+  ],
+  "教程与研究综述": [
+    "tutorial",
+    "survey paper",
+    "awesome list",
+    "course materials",
+    "reading list",
+    "literature review"
+  ]
+}
