@@ -153,8 +153,8 @@ class Handler(BaseHTTPRequestHandler):
                 item = STORE.update_category(str(body.get("id", "")), str(body.get("name", "")), body.get("parent"))
                 self.json(200, item)
             elif path == "/api/category-delete":
-                STORE.delete_category(str(body.get("id", "")))
-                self.json(200, {"ok": True})
+                result = STORE.delete_category(str(body.get("id", "")), str(body.get("mode", "reparent")))
+                self.json(200, result)
             elif path == "/api/repo-categories":
                 ids = body.get("repo_ids")
                 cats = body.get("category_ids")

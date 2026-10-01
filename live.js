@@ -44,6 +44,7 @@ const state = {
   visibleLimit: 80, modal: null, theme: localStorage.getItem('gitwiki-theme') || 'light',
   readmes: new Map(), toastTimer: null, lastJobFingerprint: '', noteTimer: null,
   pendingStateRefresh: false, editCategoryId: '', confirmCategoryDelete: false,
+  draggingCategoryId: '',
 };
 
 document.body.dataset.theme = state.theme;
@@ -65,6 +66,14 @@ function post(path, value) {
 function category(id) { return state.categories.find(c => c.id === id); }
 function repo(id) { return state.repos.find(r => r.id === id); }
 function childrenOf(id) { return state.categories.filter(c => c.parent === id); }
+function categoryPath(item) {
+  const names = [item.name];
+  const seen = new Set([item.id]);
+  for (let parent = category(item.parent); parent && !seen.has(parent.id); parent = category(parent.parent)) {
+    names.unshift(parent.name); seen.add(parent.id);
+  }
+  return names.join(' / ');
+}
 function descendantsOf(id) {
   return [id, ...childrenOf(id).flatMap(child => descendantsOf(child.id))];
 }
@@ -155,12 +164,55 @@ function renderCategoryTree(parent, depth) {
     const children = childrenOf(item.id);
     const expanded = state.showAllCategories || state.expanded.has(item.id);
     const active = state.activeScope === 'category:' + item.id;
-    return '<div class="category-node"><div class="category-row" data-depth="' + depth + '" data-category-id="' + esc(item.id) + '">' +
+    return '<div class="category-node"><div class="category-row" draggable="true" style="--depth:' + depth + '" data-depth="' + depth + '" data-category-id="' + esc(item.id) + '">' +
       (children.length ? '<button class="category-toggle" data-action="toggle-category" data-id="' + esc(item.id) + '" aria-label="' + (expanded ? '收起' : '展开') + esc(item.name) + '"><span class="' + (expanded ? 'rotated' : '') + '">' + icon('chevron', 12) + '</span></button>' : '<span class="category-toggle"></span>') +
       '<button class="category-item ' + (active ? 'active' : '') + '" data-action="category" data-id="' + esc(item.id) + '" title="' + esc(item.name) + '"><span class="category-dot" style="--cat-color:' + esc(item.color) + '"></span><span class="category-label">' + esc(item.name) + '</span><span class="category-count">' + categoryCount(item) + '</span></button>' +
-      '<button class="category-edit" data-action="edit-category" data-id="' + esc(item.id) + '" title="编辑分类" aria-label="编辑' + esc(item.name) + '">' + icon('dots', 13) + '</button></div>' +
+      '<button class="category-edit" data-action="edit-category" data-id="' + esc(item.id) + '" title="改名、移动或删除分类" aria-label="编辑分类：' + esc(item.name) + '">' + icon('dots', 13) + '</button></div>' +
       (children.length && expanded ? renderCategoryTree(item.id, depth + 1) : '') + '</div>';
   }).join('');
+}
+function jobProgressHtml(type, job) {
+  const labels = {
+    sync: { connecting: '连接 GitHub', stars: '同步 Star', lists: '同步 GitHub Lists', owned: '同步我的项目' },
+    readmes: '缓存 README', classification: '项目分类'
+  };
+  const label = type === 'sync' ? (labels.sync[job.phase] || '同步资料库') : labels[type];
+  const hasTotal = job.total > 0;
+  const progress = hasTotal ? `${formatNumber(job.current)} / ${formatNumber(job.total)}` :
+    job.current > 0 ? `${type === 'sync' ? '已读取' : '已处理'} ${formatNumber(job.current)} 个` : '正在准备';
+  const percent = hasTotal ? Math.min(100, Math.round(job.current / job.total * 100)) : 0;
+  return '<div class="job-entry"><div class="job-entry-heading"><span>' + label + '</span><strong>' + progress + '</strong></div>' +
+    '<div class="job-track ' + (hasTotal ? '' : 'indeterminate') + '" role="progressbar" aria-label="' + label + '"' +
+    (hasTotal ? ' aria-valuemin="0" aria-valuemax="' + job.total + '" aria-valuenow="' + job.current + '"' : '') +
+    '><span style="width:' + (hasTotal ? percent + '%' : '32%') + '"></span></div></div>';
+}
+function sidebarFooterHtml() {
+  const jobs = state.jobs || {};
+  const running = ['sync', 'readmes', 'classification'].filter(type => jobs[type]?.running);
+  if (running.length) {
+    return '<div class="tip-card" id="job-progress" role="status" aria-live="polite"><div class="tip-head">' +
+      icon('spark', 13) + ' 后台处理中</div>' + running.map(type => jobProgressHtml(type, jobs[type])).join('') + '</div>';
+  }
+  if (jobs.sync?.phase === 'error') {
+    return '<div class="tip-card"><div class="tip-head">' + icon('sync', 13) + ' 同步失败</div><p>' +
+      esc(jobs.sync.error || '请稍后重试。') + '</p><button class="tip-action" data-action="sync">重新同步</button></div>';
+  }
+  if (jobs.classification?.phase === 'error') {
+    return '<div class="tip-card"><div class="tip-head">' + icon('spark', 13) + ' 分类已暂停</div><p>' +
+      esc(jobs.classification.error || '可从剩余项目继续整理。') + '</p><button class="tip-action" data-action="retry-classify">继续分类</button></div>';
+  }
+  if (['paused', 'error'].includes(jobs.readmes?.phase)) {
+    return '<div class="tip-card"><div class="tip-head">' + icon('book', 13) + ' README 缓存已暂停</div><p>' +
+      esc(jobs.readmes.error || '可稍后从剩余项目继续缓存。') + '</p><button class="tip-action" data-action="retry-readmes">继续缓存</button></div>';
+  }
+  return '<div class="tip-card"><div class="tip-head">' + icon('spark', 13) +
+    ' 随手整理</div><p>把项目拖到左侧分类。一个项目可以属于多个分类；新同步的 Star 留在「未分类」。</p></div>';
+}
+function renderSidebarFooter() {
+  const container = document.querySelector('#sidebar .sidebar-bottom');
+  if (!container) return;
+  const html = sidebarFooterHtml();
+  if (container.innerHTML !== html) container.innerHTML = html;
 }
 function renderSidebar() {
   const container = document.getElementById('sidebar');
@@ -168,22 +220,15 @@ function renderSidebar() {
   const starredCount = state.repos.filter(item => item.is_starred).length;
   const ownedCount = state.repos.filter(item => item.is_owned).length;
   const uncategorized = state.repos.filter(item => !item.categories.length).length;
-  const classifyIssue = state.jobs?.classification?.phase === 'error';
-  const readmeIssue = ['paused', 'error'].includes(state.jobs?.readmes?.phase);
-  const backgroundRunning = state.jobs?.classification?.running || state.jobs?.readmes?.running;
-  const footer = classifyIssue ? '<div class="tip-card"><div class="tip-head">' + icon('spark', 13) + ' 分类已暂停</div><p>' + esc(state.jobs.classification.error || '可从剩余项目继续整理。') + '</p><button class="tip-action" data-action="retry-classify">继续分类</button></div>' :
-    readmeIssue ? '<div class="tip-card"><div class="tip-head">' + icon('book', 13) + ' README 缓存已暂停</div><p>' + esc(state.jobs.readmes.error || '可稍后从剩余项目继续缓存。') + '</p><button class="tip-action" data-action="retry-readmes">继续缓存</button></div>' :
-      backgroundRunning ? '<div class="tip-card" id="job-progress"><div class="tip-head">' + icon('spark', 13) + ' 后台处理中</div><p><span class="job-line" data-job="classification">' + (state.jobs.classification.running ? '分类 ' + state.jobs.classification.current + '/' + state.jobs.classification.total : '分类已完成') + '</span><span class="job-line" data-job="readmes">' + (state.jobs.readmes.running ? 'README ' + state.jobs.readmes.current + '/' + state.jobs.readmes.total : 'README 已完成') + '</span></p></div>' :
-      '<div class="tip-card"><div class="tip-head">' + icon('spark', 13) + ' 随手整理</div><p>把项目拖到左侧分类。一个项目可以属于多个分类；新同步的 Star 留在「未分类」。</p></div>';
   container.innerHTML = '<div class="sidebar-scroll"><div class="sidebar-group"><div class="sidebar-title">资料库</div>' +
     '<button class="nav-item ' + (state.activeScope === 'all' ? 'active' : '') + '" data-action="scope" data-id="all">' + icon('grid', 16) + '<span class="nav-label">全部收藏</span><span class="nav-count">' + starredCount.toLocaleString('zh-CN') + '</span></button>' +
     '<button class="nav-item unclassified ' + (state.activeScope === 'uncategorized' ? 'active' : '') + '" data-action="scope" data-id="uncategorized"><span class="nav-icon">' + icon('inbox', 16) + '</span><span class="nav-label">未分类</span><span class="nav-count">' + uncategorized + '</span></button>' +
     '<button class="nav-item ' + (state.activeScope === 'recent' ? 'active' : '') + '" data-action="scope" data-id="recent">' + icon('clock', 16) + '<span class="nav-label">最近收藏</span><span class="nav-count">' + recentRepos().length + '</span></button>' +
     '<button class="nav-item ' + (state.activeScope === 'owned' ? 'active' : '') + '" data-action="scope" data-id="owned">' + icon('folder', 16) + '<span class="nav-label">我的项目</span><span class="nav-count">' + ownedCount + '</span></button></div>' +
-    '<div class="sidebar-group"><div class="section-heading"><span>我的分类 · ' + state.categories.length + '</span><button data-action="new-category" title="新建分类" aria-label="新建分类">' + icon('plus', 15) + '</button></div>' +
+    '<div class="sidebar-group"><div class="section-heading category-root-drop" data-category-root-drop title="拖动分类到这里，可移至顶层"><span>我的分类 · ' + state.categories.length + '</span><button data-action="new-category" title="新建分类" aria-label="新建分类">' + icon('plus', 15) + '</button></div>' +
     renderCategoryTree(null, 0) +
     (state.categories.length ? '<button class="show-more" data-action="show-categories">' + (state.showAllCategories ? '收起分类' : '展开全部 ' + state.categories.length + ' 个分类') + '</button>' : '') + '</div></div>' +
-    '<div class="sidebar-bottom">' + footer + '</div>';
+    '<div class="sidebar-bottom">' + sidebarFooterHtml() + '</div>';
   container.querySelector('.sidebar-scroll').scrollTop = scroll;
 }
 function currentTitle() {
@@ -390,19 +435,21 @@ function renderOverlay() {
   if (state.modal === 'edit-category') {
     const item = category(state.editCategoryId);
     if (!item) { root.innerHTML = ''; return; }
-    const hasChildren = childrenOf(item.id).length > 0;
-    root.innerHTML = '<div class="modal-backdrop" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-head"><div><h2 id="modal-title">编辑分类</h2><p>调整分类名称和所在主题。</p></div><button class="icon-button" data-action="close-modal" aria-label="关闭">' + icon('x', 17) + '</button></div>' +
+    const descendants = descendantsOf(item.id);
+    const childCount = descendants.length - 1;
+    root.innerHTML = '<div class="modal-backdrop" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-head"><div><h2 id="modal-title">编辑分类</h2><p>调整名称或上级分类；也可在左侧拖动分类。</p></div><button class="icon-button" data-action="close-modal" aria-label="关闭">' + icon('x', 17) + '</button></div>' +
       '<label class="form-label" for="category-name">分类名称</label><input class="form-field" id="category-name" maxlength="50" value="' + esc(item.name) + '" />' +
       '<label class="form-label" for="category-parent">上级分类</label><select class="form-field" id="category-parent"><option value="">顶层分类</option>' +
-      state.categories.filter(cat => !cat.parent && cat.id !== item.id).map(cat => '<option value="' + esc(cat.id) + '" ' + (item.parent === cat.id ? 'selected' : '') + '>' + esc(cat.name) + '</option>').join('') + '</select>' +
-      (state.confirmCategoryDelete ? '<p class="delete-warning">删除后，这个分类与项目的关联会移除。请再次点击确认。</p>' : '') +
-      '<div class="modal-actions"><button class="delete-button" data-action="delete-category" ' + (hasChildren ? 'disabled title="请先移动或删除子分类"' : '') + '>' + (state.confirmCategoryDelete ? '确认删除' : '删除分类') + '</button><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="save-category">保存</button></div></div></div>';
+      state.categories.filter(cat => !descendants.includes(cat.id)).map(cat => '<option value="' + esc(cat.id) + '" ' + (item.parent === cat.id ? 'selected' : '') + '>' + esc(categoryPath(cat)) + '</option>').join('') + '</select>' +
+      (state.confirmCategoryDelete ? '<p class="delete-warning">删除后，此分类与项目的关联会移除。失去最后一个分类的项目会回到「未分类」。</p>' +
+        (childCount ? '<label class="form-label" for="category-delete-mode">处理 ' + childCount + ' 个子分类</label><select class="form-field" id="category-delete-mode"><option value="reparent">保留子分类，移到上一级</option><option value="subtree">连同所有子分类一起删除</option></select>' : '') : '') +
+      '<div class="modal-actions"><button class="delete-button" data-action="delete-category">' + (state.confirmCategoryDelete ? '确认删除' : '删除分类') + '</button><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="save-category">保存</button></div></div></div>';
     return;
   }
   root.innerHTML = '<div class="modal-backdrop" data-action="close-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-head"><div><h2 id="modal-title">新建分类</h2><p>把收藏整理成属于你自己的知识地图。</p></div><button class="icon-button" data-action="close-modal" aria-label="关闭">' + icon('x', 17) + '</button></div>' +
     '<label class="form-label" for="category-name">分类名称</label><input class="form-field" id="category-name" maxlength="50" placeholder="例如：文献发现工具" />' +
     '<label class="form-label" for="category-parent">上级分类</label><select class="form-field" id="category-parent"><option value="">顶层分类</option>' +
-    state.categories.filter(cat => !cat.parent).map(cat => '<option value="' + esc(cat.id) + '" ' + (state.activeScope === 'category:' + cat.id ? 'selected' : '') + '>' + esc(cat.name) + '</option>').join('') + '</select>' +
+    state.categories.map(cat => '<option value="' + esc(cat.id) + '" ' + (state.activeScope === 'category:' + cat.id ? 'selected' : '') + '>' + esc(categoryPath(cat)) + '</option>').join('') + '</select>' +
     '<div class="modal-actions"><button class="secondary-button" data-action="close-modal">取消</button><button class="primary-button" data-action="create-category">创建分类</button></div></div></div>';
 }
 function renderAll() { renderHeader(); renderSidebar(); renderBrowser(); renderDetail(); renderOverlay(); }
@@ -460,24 +507,18 @@ async function setTags(item, tags) {
 async function pollStatus() {
   try {
     const data = await api('/api/status');
-    const before = state.jobs?.sync?.phase;
+    const syncWasRunning = !!state.jobs?.sync?.running;
     const beforeClassified = state.jobs?.classification?.current || 0;
-    const beforeClassificationPhase = state.jobs?.classification?.phase;
-    const beforeReadmesPhase = state.jobs?.readmes?.phase;
     state.jobs = data.jobs;
     state.connected = data.connected;
     state.username = data.username;
     state.lastSync = data.last_sync;
     if (document.activeElement?.id !== 'global-search') renderHeader();
-    if (beforeClassificationPhase !== data.jobs.classification.phase || beforeReadmesPhase !== data.jobs.readmes.phase) renderSidebar();
-    const classProgress = document.querySelector('#job-progress [data-job="classification"]');
-    const readmeProgress = document.querySelector('#job-progress [data-job="readmes"]');
-    if (classProgress) classProgress.textContent = data.jobs.classification.running ? `分类 ${data.jobs.classification.current}/${data.jobs.classification.total}` : '分类已完成';
-    if (readmeProgress) readmeProgress.textContent = data.jobs.readmes.running ? `README ${data.jobs.readmes.current}/${data.jobs.readmes.total}` : 'README 已完成';
-    if (before === 'stars' || before === 'lists' || before === 'connecting') {
-      if (data.jobs.sync.phase === 'complete') { await loadState(true); showToast(data.jobs.sync.message); }
+    renderSidebarFooter();
+    if (syncWasRunning && !data.jobs.sync.running && data.jobs.sync.phase === 'complete') {
+      await loadState(true); showToast(data.jobs.sync.message);
     }
-    if (data.jobs.sync.phase === 'error' && before !== 'error') showToast(data.jobs.sync.error || '同步失败');
+    if (syncWasRunning && data.jobs.sync.phase === 'error') showToast(data.jobs.sync.error || '同步失败');
     if (data.jobs.classification.current > beforeClassified) state.pendingStateRefresh = true;
     if (state.pendingStateRefresh && !['global-search', 'repo-note', 'new-tag-input', 'category-name'].includes(document.activeElement?.id)) {
       state.pendingStateRefresh = false;
@@ -498,7 +539,7 @@ document.addEventListener('click', async event => {
     } else if (action === 'sync' || action === 'sync-owned') {
       if (!state.connected) { state.modal = 'auth'; renderOverlay(); return; }
       const result = await post(action === 'sync-owned' ? '/api/sync-owned' : '/api/sync', {});
-      state.jobs = result.jobs; renderHeader(); renderBrowser();
+      state.jobs = result.jobs; renderHeader(); renderSidebarFooter(); renderBrowser();
       showToast(result.started ? (action === 'sync-owned' ? '开始同步我的项目' : '开始同步 GitHub Star 与我的项目') : '同步正在进行');
     } else if (action === 'retry-classify' || action === 'retry-readmes') {
       const result = await post(action === 'retry-classify' ? '/api/classify' : '/api/readmes', {});
@@ -568,16 +609,24 @@ document.addEventListener('click', async event => {
     } else if (action === 'save-category') {
       const name = document.getElementById('category-name').value.trim();
       const parent = document.getElementById('category-parent').value || null;
+      if (!name) { document.getElementById('category-name').focus(); return; }
       const updated = await post('/api/category-update', { id: state.editCategoryId, name, parent });
-      Object.assign(category(updated.id), updated); state.modal = null; renderAll(); showToast('分类已更新');
+      Object.assign(category(updated.id), updated);
+      if (parent) state.expanded.add(parent);
+      state.modal = null; renderAll(); showToast('分类已更新');
     } else if (action === 'delete-category') {
       if (!state.confirmCategoryDelete) { state.confirmCategoryDelete = true; renderOverlay(); return; }
       const deletedId = state.editCategoryId;
-      await post('/api/category-delete', { id: deletedId });
-      state.categories = state.categories.filter(cat => cat.id !== deletedId);
-      state.repos.forEach(item => { item.categories = item.categories.filter(cat => cat !== deletedId); });
-      if (state.activeScope === 'category:' + deletedId) state.activeScope = 'all';
-      state.modal = null; ensureSelectedVisible(); renderAll(); showToast('分类已删除');
+      const parent = category(deletedId)?.parent || null;
+      const mode = document.getElementById('category-delete-mode')?.value || 'reparent';
+      const result = await post('/api/category-delete', { id: deletedId, mode });
+      const deleted = new Set(result.deleted_ids);
+      state.categories = state.categories.filter(cat => !deleted.has(cat.id));
+      state.categories.filter(cat => result.moved_children.includes(cat.id)).forEach(cat => { cat.parent = parent; });
+      state.repos.forEach(item => { item.categories = item.categories.filter(cat => !deleted.has(cat)); });
+      state.expanded = new Set([...state.expanded].filter(cat => !deleted.has(cat)));
+      if (deleted.has(state.activeScope.slice(9)) && state.activeScope.startsWith('category:')) state.activeScope = 'uncategorized';
+      state.modal = null; ensureSelectedVisible(); renderAll(); showToast(mode === 'subtree' ? '分类及子分类已删除' : '分类已删除');
     } else if (action === 'connect-github') {
       const token = document.getElementById('github-token').value.trim();
       const result = await post('/api/auth', { token });
@@ -656,28 +705,70 @@ document.addEventListener('keydown', async event => {
   }
 });
 document.addEventListener('dragstart', event => {
+  const row = event.target.closest('.category-row');
+  if (row) {
+    state.draggingCategoryId = row.dataset.categoryId;
+    event.dataTransfer.setData('application/x-gitwiki-category', state.draggingCategoryId);
+    event.dataTransfer.effectAllowed = 'move';
+    row.classList.add('dragging');
+    document.getElementById('sidebar').classList.add('category-dragging');
+    return;
+  }
   const card = event.target.closest('.repo-card'); if (!card) return;
   const id = card.dataset.repoId;
   event.dataTransfer.setData('text/plain', JSON.stringify(state.selectedIds.has(id) ? [...state.selectedIds] : [id]));
   event.dataTransfer.effectAllowed = 'copy'; card.classList.add('dragging');
 });
-document.addEventListener('dragend', () => document.querySelectorAll('.dragging,.drop-target').forEach(el => el.classList.remove('dragging','drop-target')));
+document.addEventListener('dragend', () => {
+  state.draggingCategoryId = '';
+  document.getElementById('sidebar').classList.remove('category-dragging');
+  document.querySelectorAll('.dragging,.drop-target').forEach(el => el.classList.remove('dragging','drop-target'));
+});
 document.addEventListener('dragover', event => {
-  const row = event.target.closest('.category-row'); if (!row) return;
+  const row = event.target.closest('.category-row');
+  if (state.draggingCategoryId) {
+    const root = event.target.closest('[data-category-root-drop]');
+    if (!row && !root) return;
+    if (row && descendantsOf(state.draggingCategoryId).includes(row.dataset.categoryId)) return;
+    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
+    (row || root).classList.add('drop-target');
+    return;
+  }
+  if (!row) return;
   event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; row.classList.add('drop-target');
 });
 document.addEventListener('dragleave', event => {
-  const row = event.target.closest('.category-row'); if (row && !row.contains(event.relatedTarget)) row.classList.remove('drop-target');
+  const target = event.target.closest('.category-row,[data-category-root-drop]');
+  if (target && !target.contains(event.relatedTarget)) target.classList.remove('drop-target');
 });
 document.addEventListener('drop', async event => {
-  const row = event.target.closest('.category-row'); if (!row) return;
-  event.preventDefault(); row.classList.remove('drop-target');
+  const row = event.target.closest('.category-row');
+  const root = event.target.closest('[data-category-root-drop]');
+  if (!row && !(state.draggingCategoryId && root)) return;
+  event.preventDefault();
+  document.querySelectorAll('.drop-target').forEach(el => el.classList.remove('drop-target'));
   try {
+    if (state.draggingCategoryId) {
+      const moved = category(state.draggingCategoryId);
+      const parent = row?.dataset.categoryId || null;
+      if (!moved || (parent && descendantsOf(moved.id).includes(parent))) return;
+      if (moved.parent === parent) return;
+      const updated = await post('/api/category-update', { id: moved.id, name: moved.name, parent });
+      Object.assign(moved, updated);
+      if (parent) state.expanded.add(parent);
+      renderSidebar(); showToast('分类「' + moved.name + '」已移动');
+      return;
+    }
     const ids = JSON.parse(event.dataTransfer.getData('text/plain'));
     if (!Array.isArray(ids) || !ids.length) return;
     await setCategories(ids, [row.dataset.categoryId], 'add');
     state.selectedIds.clear(); renderBrowser(); showToast(`已将 ${ids.length} 个项目加入「${category(row.dataset.categoryId)?.name || '分类'}」`);
   } catch (error) { showToast(error.message || '拖放失败'); }
+  finally {
+    state.draggingCategoryId = '';
+    document.getElementById('sidebar').classList.remove('category-dragging');
+  }
 });
 
 loadState().catch(error => showToast('资料库加载失败：' + error.message));

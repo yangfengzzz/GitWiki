@@ -431,13 +431,33 @@ class Store:
             return {"id": category_id, "name": name, "parent": parent,
                     "color": item["color"], "source": item["source"]}
 
-    def delete_category(self, category_id: str) -> None:
+    def delete_category(self, category_id: str, mode: str = "reparent") -> dict:
+        """Delete a category, preserving direct children or deleting the whole subtree."""
+        if mode not in ("reparent", "subtree"):
+            raise ValueError("无效的分类删除方式")
         with self.connection() as db:
-            if not db.execute("SELECT 1 FROM categories WHERE id=?", (category_id,)).fetchone():
+            item = db.execute("SELECT parent_id FROM categories WHERE id=?", (category_id,)).fetchone()
+            if not item:
                 raise KeyError(category_id)
-            if db.execute("SELECT 1 FROM categories WHERE parent_id=?", (category_id,)).fetchone():
-                raise ValueError("请先移动或删除此分类下的子分类")
-            db.execute("DELETE FROM categories WHERE id=?", (category_id,))
+            if mode == "reparent":
+                children = [row[0] for row in db.execute("SELECT id FROM categories WHERE parent_id=?", (category_id,))]
+                child_names = {row[0].casefold() for row in db.execute(
+                    "SELECT name FROM categories WHERE parent_id=?", (category_id,))}
+                sibling_names = {row[0].casefold() for row in db.execute(
+                    "SELECT name FROM categories WHERE parent_id IS ? AND id<>?", (item["parent_id"], category_id))}
+                if child_names & sibling_names:
+                    raise ValueError("子分类与上级已有同名分类，请先移动或改名")
+                db.execute("UPDATE categories SET parent_id=? WHERE parent_id=?", (item["parent_id"], category_id))
+                db.execute("DELETE FROM categories WHERE id=?", (category_id,))
+                return {"deleted_ids": [category_id], "moved_children": children}
+            pending = [category_id]
+            deleted = []
+            while pending:
+                current = pending.pop()
+                deleted.append(current)
+                pending.extend(row[0] for row in db.execute("SELECT id FROM categories WHERE parent_id=?", (current,)))
+            db.executemany("DELETE FROM categories WHERE id=?", [(item_id,) for item_id in reversed(deleted)])
+            return {"deleted_ids": deleted, "moved_children": []}
 
     def search_readmes(self, query: str) -> set[str]:
         if not query.strip():

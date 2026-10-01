@@ -290,9 +290,11 @@ body[data-theme="dark"] .nav-item.unclassified.active { color: var(--amber); }
   border-radius: 6px;
 }
 .section-heading button:hover { background: var(--surface-hover); color: var(--accent); }
-.category-row { display: flex; align-items: center; position: relative; border-radius: 8px; }
-.category-row[data-depth="1"] { margin-left: 16px; }
+.category-row { display: flex; align-items: center; position: relative; border-radius: 8px; margin-left: calc(var(--depth, 0) * 14px); }
+.category-row.dragging { opacity: .45; }
 .category-row.drop-target { background: var(--accent-soft); outline: 1px dashed var(--accent); }
+.category-dragging .category-root-drop { border-radius: 7px; background: var(--surface-hover); outline: 1px dashed var(--accent-border); }
+.category-root-drop.drop-target { background: var(--accent-soft); outline-color: var(--accent); }
 .category-toggle {
   width: 20px;
   height: 30px;
@@ -307,7 +309,7 @@ body[data-theme="dark"] .nav-item.unclassified.active { color: var(--amber); }
 .category-toggle:hover { color: var(--ink); }
 .category-toggle .rotated { transform: rotate(90deg); }
 .category-item { padding-left: 3px; gap: 7px; }
-.category-edit { flex: 0 0 22px; width: 22px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted-soft); opacity: 0; }
+.category-edit { flex: 0 0 22px; width: 22px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--muted); opacity: .85; }
 .category-row:hover .category-edit, .category-edit:focus-visible { opacity: 1; }
 .category-edit:hover { color: var(--accent); background: var(--surface-hover); }
 .category-dot {
@@ -318,7 +320,7 @@ body[data-theme="dark"] .nav-item.unclassified.active { color: var(--amber); }
   background: var(--cat-color, var(--accent));
   opacity: .8;
 }
-.category-row[data-depth="1"] .category-dot { width: 5px; height: 5px; flex-basis: 5px; border-radius: 50%; opacity: .5; }
+.category-row:not([data-depth="0"]) .category-dot { width: 5px; height: 5px; flex-basis: 5px; border-radius: 50%; opacity: .5; }
 .show-more {
   margin: 6px 0 0 14px;
   border: 0;
@@ -344,7 +346,14 @@ body[data-theme="dark"] .nav-item.unclassified.active { color: var(--amber); }
 }
 .tip-head { display: flex; gap: 7px; align-items: center; color: var(--accent); font-size: 11px; font-weight: 700; }
 .tip-card p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.6; }
-.job-line { display: block; }
+.job-entry { margin-top: 10px; }
+.job-entry-heading { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; color: var(--ink); font-size: 10px; }
+.job-entry-heading strong { color: var(--muted); font-size: 10px; font-weight: 600; white-space: nowrap; }
+.job-track { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 4px; background: var(--accent-soft); }
+.job-track span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .25s ease; }
+.job-track.indeterminate span { animation: job-progress-sweep 1.5s ease-in-out infinite alternate; }
+@keyframes job-progress-sweep { from { transform: translateX(-100%); } to { transform: translateX(312%); } }
+@media (prefers-reduced-motion: reduce) { .job-track.indeterminate span { animation: none; } }
 .tip-action { margin-top: 8px; padding: 0; border: 0; background: transparent; color: var(--accent); font-size: 10px; font-weight: 700; }
 .tip-action:hover { text-decoration: underline; }
 .delete-button { border: 0; background: transparent; color: #a04942; font-size: 11px; font-weight: 700; margin-right: auto; }

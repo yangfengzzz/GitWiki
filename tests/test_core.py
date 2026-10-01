@@ -135,12 +135,29 @@ class StoreFlowTest(unittest.TestCase):
         store.set_categories(["owner/one"], [child["id"]])
         with self.assertRaises(ValueError):
             store.update_category(root["id"], "Root", child["id"])
-        with self.assertRaises(ValueError):
-            store.delete_category(root["id"])
-        renamed = store.update_category(child["id"], "Renamed", None)
-        self.assertEqual((renamed["name"], renamed["parent"]), ("Renamed", None))
+        renamed = store.update_category(child["id"], "Renamed", root["id"])
+        self.assertEqual((renamed["name"], renamed["parent"]), ("Renamed", root["id"]))
+        result = store.delete_category(root["id"])
+        self.assertEqual(result, {"deleted_ids": [root["id"]], "moved_children": [child["id"]]})
+        self.assertIsNone(next(cat for cat in store.categories() if cat["id"] == child["id"])["parent"])
+        self.assertEqual(store.repos()[0]["categories"], [child["id"]])
         store.delete_category(child["id"])
         self.assertEqual(store.repos()[0]["categories"], [])
+
+    def test_delete_category_subtree_orphans_only_projects_without_other_categories(self):
+        store = self.store
+        store.replace_stars([star("owner/one"), star("owner/two")])
+        root = store.create_category("Root")
+        child = store.create_category("Child", root["id"])
+        grandchild = store.create_category("Grandchild", child["id"])
+        other = store.create_category("Other")
+        store.set_categories(["owner/one", "owner/two"], [grandchild["id"]])
+        store.set_categories(["owner/two"], [other["id"]], "add")
+        result = store.delete_category(root["id"], "subtree")
+        self.assertEqual(set(result["deleted_ids"]), {root["id"], child["id"], grandchild["id"]})
+        repos = {item["id"]: item for item in store.repos()}
+        self.assertEqual(repos["owner/one"]["categories"], [])
+        self.assertEqual(repos["owner/two"]["categories"], [other["id"]])
 
     def test_readme_cache_processes_all_pending_repositories(self):
         store = self.store
