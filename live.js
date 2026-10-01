@@ -68,6 +68,11 @@ function childrenOf(id) { return state.categories.filter(c => c.parent === id); 
 function descendantsOf(id) {
   return [id, ...childrenOf(id).flatMap(child => descendantsOf(child.id))];
 }
+function expandCategoryPath(id) {
+  for (let current = category(id); current; current = category(current.parent)) {
+    if (current.parent) state.expanded.add(current.parent);
+  }
+}
 function joinedCategories(item) { return item.categories.map(category).filter(Boolean); }
 function selectedRepo() { return repo(state.selectedId); }
 function dateOnly(value) { return value ? value.slice(0, 10) : ''; }
@@ -108,7 +113,9 @@ function matchingRepos() {
     return true;
   });
   items.sort((a, b) => state.sort === 'name' ? a.name.localeCompare(b.name) :
-    state.sort === 'updated' ? b.updated.localeCompare(a.updated) : b.starred.localeCompare(a.starred));
+    state.sort === 'updated' ? b.updated.localeCompare(a.updated) :
+      state.sort === 'stars' ? (Number(b.stars) - Number(a.stars) || b.starred.localeCompare(a.starred)) :
+        b.starred.localeCompare(a.starred));
   return items;
 }
 function ensureSelectedVisible() {
@@ -185,13 +192,13 @@ function currentTitle() {
 function renderRepoCard(item) {
   const active = item.id === state.selectedId;
   const checked = state.selectedIds.has(item.id);
-  const firstCat = joinedCategories(item)[0];
+  const categories = joinedCategories(item);
   const [color, bg] = repoColor(item);
   return '<div class="repo-card ' + (active ? 'active' : '') + '" draggable="true" data-repo-id="' + esc(item.id) + '" data-action="select-repo"><div class="repo-top">' +
     '<div class="repo-avatar" style="--avatar-color:' + color + ';--avatar-bg:' + bg + '">' + esc(item.name.charAt(0).toUpperCase()) + '</div><div class="repo-content">' +
     '<div class="repo-title-line"><div class="repo-name"><span>' + esc(item.owner) + ' / </span>' + esc(item.name) + '</div><button class="repo-select ' + (checked ? 'checked' : '') + '" data-action="toggle-select" data-id="' + esc(item.id) + '" aria-label="选择项目">' + (checked ? icon('check', 11) : '') + '</button></div>' +
     '<p class="repo-desc">' + esc(item.description || '暂无描述') + '</p><div class="repo-tags">' +
-    (firstCat ? '<span class="mini-tag category-tag">' + esc(firstCat.name) + '</span>' : '<span class="mini-tag uncategorized">未分类</span>') +
+    (categories.length ? categories.map(cat => '<button class="mini-tag category-tag category-link" type="button" data-action="category" data-id="' + esc(cat.id) + '" title="查看分类：' + esc(cat.name) + '">' + esc(cat.name) + '</button>').join('') : '<span class="mini-tag uncategorized">未分类</span>') +
     item.topics.slice(0, 2).map(topic => '<span class="mini-tag">' + esc(topic) + '</span>').join('') + '</div></div></div>' +
     '<div class="repo-bottom"><span>' + icon('star', 12) + formatNumber(item.stars) + '</span><span><i class="language-dot" style="--lang-color:' + color + '"></i>' + esc(item.language) + '</span><span class="push-right">' + formattedDate(item.starred) + ' 收藏</span></div></div>';
 }
@@ -204,7 +211,7 @@ function renderBrowser() {
   const onboarding = !state.repos.length && !state.jobs?.sync?.running;
   container.innerHTML = '<div class="browser-head"><div class="eyebrow">' + esc(title.eyebrow) + '</div><div class="browser-title-row"><div><h1 class="browser-title">' + esc(title.title) + '</h1><p class="browser-subtitle">' + esc(title.subtitle) + '</p></div><span class="title-icon">' + icon(state.activeScope === 'uncategorized' ? 'inbox' : 'book', 18) + '</span></div>' +
     '<div class="browser-toolbar"><div class="filter-tabs"><button class="filter-tab ' + (state.quickFilter === 'all' ? 'active' : '') + '" data-action="quick-filter" data-id="all">全部</button><button class="filter-tab ' + (state.quickFilter === 'noted' ? 'active' : '') + '" data-action="quick-filter" data-id="noted">有笔记</button><button class="filter-tab ' + (state.quickFilter === 'tagged' ? 'active' : '') + '" data-action="quick-filter" data-id="tagged">有标签</button></div>' +
-    '<select class="sort-select" id="sort-select" aria-label="排序方式"><option value="starred" ' + (state.sort === 'starred' ? 'selected' : '') + '>最近收藏</option><option value="updated" ' + (state.sort === 'updated' ? 'selected' : '') + '>最近更新</option><option value="name" ' + (state.sort === 'name' ? 'selected' : '') + '>名称 A–Z</option></select></div></div>' +
+    '<select class="sort-select" id="sort-select" aria-label="排序方式"><option value="starred" ' + (state.sort === 'starred' ? 'selected' : '') + '>最近收藏</option><option value="updated" ' + (state.sort === 'updated' ? 'selected' : '') + '>最近更新</option><option value="stars" ' + (state.sort === 'stars' ? 'selected' : '') + '>Star 最多</option><option value="name" ' + (state.sort === 'name' ? 'selected' : '') + '>名称 A–Z</option></select></div></div>' +
     '<div class="browser-list"><div class="list-intro"><span>' + (state.query ? '搜索结果' : '项目') + ' · ' + items.length.toLocaleString('zh-CN') + ' 个</span><span>拖放即可归类</span></div>' +
     (shown.length ? shown.map(renderRepoCard).join('') : onboarding ?
       '<div class="empty-state"><div class="empty-symbol">' + icon('star', 24) + '</div><h3>把你的 Star 带进来</h3><p>读取现有 GitHub Lists，建立可以搜索、标注和反复使用的本地资料库。</p><button class="primary-button" data-action="sync">开始导入</button></div>' :
@@ -308,7 +315,8 @@ function readmeMarkup(item, full) {
   return '<div class="markdown-body">' + markdownToHtml(cached.text || '', item, full ? 200000 : 2500) + '</div>';
 }
 function categoryChips(item) {
-  const chips = joinedCategories(item).map(cat => '<span class="category-chip">' + icon('folder', 12) + esc(cat.name) +
+  const chips = joinedCategories(item).map(cat => '<span class="category-chip">' + icon('folder', 12) +
+    '<button class="category-chip-link" type="button" data-action="category" data-id="' + esc(cat.id) + '" title="查看分类：' + esc(cat.name) + '">' + esc(cat.name) + '</button>' +
     '<button class="chip-remove" data-action="remove-category" data-id="' + esc(cat.id) + '" title="从此分类移除" aria-label="从此分类移除">' + icon('x', 11) + '</button></span>').join('');
   return '<div class="chip-list">' + (chips || '<span class="mini-tag uncategorized">尚未分类</span>') +
     (state.showCategoryPicker ? '<select id="detail-category-picker" class="inline-select"><option value="">选择分类…</option>' +
@@ -488,9 +496,15 @@ document.addEventListener('click', async event => {
       const status = await api('/api/status'); state.jobs = status.jobs; renderHeader(); renderSidebar();
     } else if (action === 'scope' || action === 'category') {
       state.activeScope = action === 'scope' ? id : 'category:' + id;
+      if (action === 'category') {
+        expandCategoryPath(id);
+        state.query = ''; state.readmeHits = new Set();
+        const search = document.getElementById('global-search'); if (search) search.value = '';
+      }
       state.quickFilter = 'all'; state.visibleLimit = 80; state.selectedIds.clear();
       ensureSelectedVisible(); renderSidebar(); renderBrowser(); renderDetail();
-      document.getElementById('app-shell').classList.remove('show-nav');
+      document.getElementById('browser').querySelector('.browser-list').scrollTop = 0;
+      document.getElementById('app-shell').classList.remove('show-nav', 'detail-open');
       if (state.selectedId) loadReadme(state.selectedId);
     } else if (action === 'toggle-category') {
       if (state.expanded.has(id)) state.expanded.delete(id); else state.expanded.add(id);
@@ -599,7 +613,11 @@ document.addEventListener('input', event => {
 });
 document.addEventListener('change', async event => {
   try {
-    if (event.target.id === 'sort-select') { state.sort = event.target.value; renderBrowser(); }
+    if (event.target.id === 'sort-select') {
+      state.sort = event.target.value;
+      renderBrowser();
+      document.getElementById('browser').querySelector('.browser-list').scrollTop = 0;
+    }
     else if (event.target.id === 'detail-category-picker') {
       if (event.target.value && state.selectedId) await setCategories([state.selectedId], [event.target.value], 'add');
       state.showCategoryPicker = false; renderDetail();
