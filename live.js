@@ -91,14 +91,16 @@ function repoColor(item) {
 }
 function recentRepos() {
   const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  return state.repos.filter(item => new Date(item.starred).getTime() >= cutoff);
+  return state.repos.filter(item => item.is_starred && new Date(item.starred).getTime() >= cutoff);
 }
 function matchingRepos() {
   const query = state.query.trim().toLowerCase();
   const recentCutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
   let items = state.repos.filter(item => {
+    if (state.activeScope === 'all' && !item.is_starred) return false;
+    if (state.activeScope === 'owned' && !item.is_owned) return false;
     if (state.activeScope === 'uncategorized' && item.categories.length) return false;
-    if (state.activeScope === 'recent' && new Date(item.starred).getTime() < recentCutoff) return false;
+    if (state.activeScope === 'recent' && (!item.is_starred || new Date(item.starred).getTime() < recentCutoff)) return false;
     if (state.activeScope.startsWith('category:')) {
       const ids = descendantsOf(state.activeScope.slice(9));
       if (!item.categories.some(id => ids.includes(id))) return false;
@@ -163,6 +165,8 @@ function renderCategoryTree(parent, depth) {
 function renderSidebar() {
   const container = document.getElementById('sidebar');
   const scroll = container.querySelector('.sidebar-scroll')?.scrollTop || 0;
+  const starredCount = state.repos.filter(item => item.is_starred).length;
+  const ownedCount = state.repos.filter(item => item.is_owned).length;
   const uncategorized = state.repos.filter(item => !item.categories.length).length;
   const classifyIssue = state.jobs?.classification?.phase === 'error';
   const readmeIssue = ['paused', 'error'].includes(state.jobs?.readmes?.phase);
@@ -172,9 +176,10 @@ function renderSidebar() {
       backgroundRunning ? '<div class="tip-card" id="job-progress"><div class="tip-head">' + icon('spark', 13) + ' 后台处理中</div><p><span class="job-line" data-job="classification">' + (state.jobs.classification.running ? '分类 ' + state.jobs.classification.current + '/' + state.jobs.classification.total : '分类已完成') + '</span><span class="job-line" data-job="readmes">' + (state.jobs.readmes.running ? 'README ' + state.jobs.readmes.current + '/' + state.jobs.readmes.total : 'README 已完成') + '</span></p></div>' :
       '<div class="tip-card"><div class="tip-head">' + icon('spark', 13) + ' 随手整理</div><p>把项目拖到左侧分类。一个项目可以属于多个分类；新同步的 Star 留在「未分类」。</p></div>';
   container.innerHTML = '<div class="sidebar-scroll"><div class="sidebar-group"><div class="sidebar-title">资料库</div>' +
-    '<button class="nav-item ' + (state.activeScope === 'all' ? 'active' : '') + '" data-action="scope" data-id="all">' + icon('grid', 16) + '<span class="nav-label">全部收藏</span><span class="nav-count">' + state.repos.length.toLocaleString('zh-CN') + '</span></button>' +
+    '<button class="nav-item ' + (state.activeScope === 'all' ? 'active' : '') + '" data-action="scope" data-id="all">' + icon('grid', 16) + '<span class="nav-label">全部收藏</span><span class="nav-count">' + starredCount.toLocaleString('zh-CN') + '</span></button>' +
     '<button class="nav-item unclassified ' + (state.activeScope === 'uncategorized' ? 'active' : '') + '" data-action="scope" data-id="uncategorized"><span class="nav-icon">' + icon('inbox', 16) + '</span><span class="nav-label">未分类</span><span class="nav-count">' + uncategorized + '</span></button>' +
-    '<button class="nav-item ' + (state.activeScope === 'recent' ? 'active' : '') + '" data-action="scope" data-id="recent">' + icon('clock', 16) + '<span class="nav-label">最近收藏</span><span class="nav-count">' + recentRepos().length + '</span></button></div>' +
+    '<button class="nav-item ' + (state.activeScope === 'recent' ? 'active' : '') + '" data-action="scope" data-id="recent">' + icon('clock', 16) + '<span class="nav-label">最近收藏</span><span class="nav-count">' + recentRepos().length + '</span></button>' +
+    '<button class="nav-item ' + (state.activeScope === 'owned' ? 'active' : '') + '" data-action="scope" data-id="owned">' + icon('folder', 16) + '<span class="nav-label">我的项目</span><span class="nav-count">' + ownedCount + '</span></button></div>' +
     '<div class="sidebar-group"><div class="section-heading"><span>我的分类 · ' + state.categories.length + '</span><button data-action="new-category" title="新建分类" aria-label="新建分类">' + icon('plus', 15) + '</button></div>' +
     renderCategoryTree(null, 0) +
     (state.categories.length ? '<button class="show-more" data-action="show-categories">' + (state.showAllCategories ? '收起分类' : '展开全部 ' + state.categories.length + ' 个分类') + '</button>' : '') + '</div></div>' +
@@ -184,6 +189,7 @@ function renderSidebar() {
 function currentTitle() {
   if (state.activeScope === 'uncategorized') return { title: '未分类', subtitle: '新同步的项目会先来到这里，等你给它们一个位置。', eyebrow: 'INBOX' };
   if (state.activeScope === 'recent') return { title: '最近收藏', subtitle: '回看最近加入资料库的发现。', eyebrow: 'RECENTLY STARRED' };
+  if (state.activeScope === 'owned') return { title: '我的项目', subtitle: '账号下的仓库集中在这里，已收藏的项目也只保存一份。', eyebrow: 'MY REPOSITORIES' };
   if (state.activeScope.startsWith('category:')) {
     return { title: category(state.activeScope.slice(9))?.name || '分类', subtitle: '一个主题下的项目、想法与可复用的工具。', eyebrow: 'COLLECTION' };
   }
@@ -199,8 +205,10 @@ function renderRepoCard(item) {
     '<div class="repo-title-line"><div class="repo-name"><span>' + esc(item.owner) + ' / </span>' + esc(item.name) + '</div><button class="repo-select ' + (checked ? 'checked' : '') + '" data-action="toggle-select" data-id="' + esc(item.id) + '" aria-label="选择项目">' + (checked ? icon('check', 11) : '') + '</button></div>' +
     '<p class="repo-desc">' + esc(item.description || '暂无描述') + '</p><div class="repo-tags">' +
     (categories.length ? categories.map(cat => '<button class="mini-tag category-tag category-link" type="button" data-action="category" data-id="' + esc(cat.id) + '" title="查看分类：' + esc(cat.name) + '">' + esc(cat.name) + '</button>').join('') : '<span class="mini-tag uncategorized">未分类</span>') +
+    (item.is_owned && state.activeScope !== 'owned' ? '<span class="mini-tag">我的项目</span>' : '') +
+    (item.private ? '<span class="mini-tag">私有</span>' : '') +
     item.topics.slice(0, 2).map(topic => '<span class="mini-tag">' + esc(topic) + '</span>').join('') + '</div></div></div>' +
-    '<div class="repo-bottom"><span>' + icon('star', 12) + formatNumber(item.stars) + '</span><span><i class="language-dot" style="--lang-color:' + color + '"></i>' + esc(item.language) + '</span><span class="push-right">' + formattedDate(item.starred) + ' 收藏</span></div></div>';
+    '<div class="repo-bottom"><span>' + icon('star', 12) + formatNumber(item.stars) + '</span><span><i class="language-dot" style="--lang-color:' + color + '"></i>' + esc(item.language) + '</span><span class="push-right">' + (item.is_starred ? formattedDate(item.starred) + ' 收藏' : formattedDate(item.updated) + ' 更新') + '</span></div></div>';
 }
 function renderBrowser() {
   const container = document.getElementById('browser');
@@ -209,7 +217,8 @@ function renderBrowser() {
   const items = matchingRepos();
   const shown = items.slice(0, state.visibleLimit);
   const onboarding = !state.repos.length && !state.jobs?.sync?.running;
-  container.innerHTML = '<div class="browser-head"><div class="eyebrow">' + esc(title.eyebrow) + '</div><div class="browser-title-row"><div><h1 class="browser-title">' + esc(title.title) + '</h1><p class="browser-subtitle">' + esc(title.subtitle) + '</p></div><span class="title-icon">' + icon(state.activeScope === 'uncategorized' ? 'inbox' : 'book', 18) + '</span></div>' +
+  container.innerHTML = '<div class="browser-head"><div class="eyebrow">' + esc(title.eyebrow) + '</div><div class="browser-title-row"><div><h1 class="browser-title">' + esc(title.title) + '</h1><p class="browser-subtitle">' + esc(title.subtitle) + '</p></div>' +
+    (state.activeScope === 'owned' ? '<button class="secondary-button" data-action="sync-owned" ' + (state.jobs?.sync?.running ? 'disabled' : '') + '>同步我的项目</button>' : '<span class="title-icon">' + icon(state.activeScope === 'uncategorized' ? 'inbox' : 'book', 18) + '</span>') + '</div>' +
     '<div class="browser-toolbar"><div class="filter-tabs"><button class="filter-tab ' + (state.quickFilter === 'all' ? 'active' : '') + '" data-action="quick-filter" data-id="all">全部</button><button class="filter-tab ' + (state.quickFilter === 'noted' ? 'active' : '') + '" data-action="quick-filter" data-id="noted">有笔记</button><button class="filter-tab ' + (state.quickFilter === 'tagged' ? 'active' : '') + '" data-action="quick-filter" data-id="tagged">有标签</button></div>' +
     '<select class="sort-select" id="sort-select" aria-label="排序方式"><option value="starred" ' + (state.sort === 'starred' ? 'selected' : '') + '>最近收藏</option><option value="updated" ' + (state.sort === 'updated' ? 'selected' : '') + '>最近更新</option><option value="stars" ' + (state.sort === 'stars' ? 'selected' : '') + '>Star 最多</option><option value="name" ' + (state.sort === 'name' ? 'selected' : '') + '>名称 A–Z</option></select></div></div>' +
     '<div class="browser-list"><div class="list-intro"><span>' + (state.query ? '搜索结果' : '项目') + ' · ' + items.length.toLocaleString('zh-CN') + ' 个</span><span>拖放即可归类</span></div>' +
@@ -362,7 +371,7 @@ function renderDetail() {
     '<div class="metrics"><div class="metric"><div class="metric-label">' + icon('star', 12) + 'GitHub Stars</div><div class="metric-value">' + formatNumber(item.stars) + '</div></div>' +
     '<div class="metric"><div class="metric-label"><i class="language-dot" style="--lang-color:' + color + '"></i>主要语言</div><div class="metric-value">' + esc(item.language) + '</div></div>' +
     '<div class="metric"><div class="metric-label">' + icon('clock', 12) + '最近更新</div><div class="metric-value">' + formattedDate(item.updated) + '</div></div>' +
-    '<div class="metric"><div class="metric-label">' + icon('book', 12) + '收藏于</div><div class="metric-value">' + formattedDate(item.starred) + '</div></div></div>' +
+    '<div class="metric"><div class="metric-label">' + icon('book', 12) + (item.is_starred ? '收藏于' : '创建于') + '</div><div class="metric-value">' + formattedDate(item.is_starred ? item.starred : item.created) + '</div></div></div>' +
     '<nav class="detail-tabs" aria-label="项目详情"><button class="detail-tab ' + (state.detailTab === 'overview' ? 'active' : '') + '" data-action="detail-tab" data-id="overview">概览</button>' +
     '<button class="detail-tab ' + (state.detailTab === 'readme' ? 'active' : '') + '" data-action="detail-tab" data-id="readme">README</button>' +
     '<button class="detail-tab ' + (state.detailTab === 'notes' ? 'active' : '') + '" data-action="detail-tab" data-id="notes">我的笔记</button></nav>' +
@@ -486,16 +495,18 @@ document.addEventListener('click', async event => {
     if (action === 'theme') {
       state.theme = state.theme === 'light' ? 'dark' : 'light';
       document.body.dataset.theme = state.theme; localStorage.setItem('gitwiki-theme', state.theme); renderHeader();
-    } else if (action === 'sync') {
+    } else if (action === 'sync' || action === 'sync-owned') {
       if (!state.connected) { state.modal = 'auth'; renderOverlay(); return; }
-      const result = await post('/api/sync', {});
-      state.jobs = result.jobs; renderHeader(); showToast(result.started ? '开始同步 GitHub Star' : '同步正在进行');
+      const result = await post(action === 'sync-owned' ? '/api/sync-owned' : '/api/sync', {});
+      state.jobs = result.jobs; renderHeader(); renderBrowser();
+      showToast(result.started ? (action === 'sync-owned' ? '开始同步我的项目' : '开始同步 GitHub Star 与我的项目') : '同步正在进行');
     } else if (action === 'retry-classify' || action === 'retry-readmes') {
       const result = await post(action === 'retry-classify' ? '/api/classify' : '/api/readmes', {});
       showToast(result.started ? '已从剩余项目继续' : '后台任务正在进行');
       const status = await api('/api/status'); state.jobs = status.jobs; renderHeader(); renderSidebar();
     } else if (action === 'scope' || action === 'category') {
       state.activeScope = action === 'scope' ? id : 'category:' + id;
+      if (action === 'scope' && id === 'owned' && state.sort === 'starred') state.sort = 'updated';
       if (action === 'category') {
         expandCategoryPath(id);
         state.query = ''; state.readmeHits = new Set();

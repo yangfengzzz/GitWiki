@@ -44,6 +44,9 @@ class Store:
                   readme_fetched_at TEXT,
                   note TEXT NOT NULL DEFAULT '',
                   is_starred INTEGER NOT NULL DEFAULT 1,
+                  is_owned INTEGER NOT NULL DEFAULT 0,
+                  is_private INTEGER NOT NULL DEFAULT 0,
+                  created_at TEXT NOT NULL DEFAULT '',
                   new_since_sync INTEGER NOT NULL DEFAULT 0,
                   updated_at TEXT NOT NULL
                 );
@@ -83,6 +86,13 @@ class Store:
                   reviewed_at TEXT NOT NULL,
                   suggested_categories TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS owned_reviews (
+                  repo_id TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
+                  run_id TEXT NOT NULL,
+                  pushed_at TEXT NOT NULL,
+                  readme_status TEXT NOT NULL DEFAULT '',
+                  reviewed_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS manual_category_edits (
                   repo_id TEXT PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
                   edited_at TEXT NOT NULL
@@ -96,6 +106,26 @@ class Store:
                   PRIMARY KEY(repo_id,list_id)
                 );
                 """
+            )
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(repos)")}
+            for name, definition in (
+                ("is_owned", "INTEGER NOT NULL DEFAULT 0"),
+                ("is_private", "INTEGER NOT NULL DEFAULT 0"),
+                ("created_at", "TEXT NOT NULL DEFAULT ''"),
+            ):
+                if name not in columns:
+                    db.execute(f"ALTER TABLE repos ADD COLUMN {name} {definition}")
+            review_columns = {row["name"] for row in db.execute("PRAGMA table_info(owned_reviews)")}
+            if "readme_status" not in review_columns:
+                db.execute("ALTER TABLE owned_reviews ADD COLUMN readme_status TEXT NOT NULL DEFAULT ''")
+            db.execute(
+                """UPDATE owned_reviews SET readme_status=(
+                     SELECT r.readme_status FROM repos r WHERE r.id=owned_reviews.repo_id
+                   ) WHERE readme_status='' AND EXISTS (
+                     SELECT 1 FROM repos r WHERE r.id=owned_reviews.repo_id
+                       AND (r.readme_status<>'ready' OR r.readme_fetched_at IS NULL
+                            OR datetime(r.readme_fetched_at)<=datetime(owned_reviews.reviewed_at))
+                   )"""
             )
 
     @contextmanager
@@ -161,6 +191,43 @@ class Store:
             elif old_ids:
                 db.execute("UPDATE repos SET is_starred=0,new_since_sync=0")
             return {"total": len(seen), "new": len(seen - old_ids) if previously_synced else 0, "removed": len(old_ids - seen)}
+
+    def replace_owned_repos(self, repos: list[dict]) -> dict:
+        """Merge owned repositories by full name, preserving existing Stars and annotations."""
+        timestamp = now()
+        with self.connection() as db:
+            old_ids = {row[0] for row in db.execute("SELECT id FROM repos WHERE is_owned=1")}
+            existing_ids = {row[0] for row in db.execute("SELECT id FROM repos")}
+            starred_ids = {row[0] for row in db.execute("SELECT id FROM repos WHERE is_starred=1")}
+            seen = set()
+            for item in repos:
+                full_name = item.get("full_name")
+                if not full_name or "/" not in full_name:
+                    continue
+                seen.add(full_name)
+                db.execute(
+                    """INSERT INTO repos(id,github_id,description,language,stars,pushed_at,starred_at,
+                       topics,default_branch,archived,is_starred,is_owned,is_private,created_at,updated_at)
+                       VALUES(?,?,?,?,?,?,'',?,?,?,0,1,?,?,?)
+                       ON CONFLICT(id) DO UPDATE SET
+                       github_id=excluded.github_id,description=excluded.description,
+                       language=excluded.language,stars=excluded.stars,pushed_at=excluded.pushed_at,
+                       topics=excluded.topics,default_branch=excluded.default_branch,
+                       archived=excluded.archived,is_owned=1,is_private=excluded.is_private,
+                       created_at=excluded.created_at,
+                       readme_status=CASE WHEN repos.pushed_at<>excluded.pushed_at THEN 'pending' ELSE repos.readme_status END,
+                       updated_at=excluded.updated_at""",
+                    (full_name, item.get("id"), item.get("description") or "",
+                     item.get("language") or "", item.get("stargazers_count") or 0,
+                     item.get("pushed_at") or item.get("updated_at") or "",
+                     json.dumps(item.get("topics") or []), item.get("default_branch") or "main",
+                     int(bool(item.get("archived"))), int(bool(item.get("private"))),
+                     item.get("created_at") or "", timestamp),
+                )
+            db.executemany("UPDATE repos SET is_owned=0 WHERE id=?", [(repo_id,) for repo_id in old_ids - seen])
+            return {"total": len(seen), "new": len(seen - old_ids),
+                    "added": len(seen - existing_ids), "removed": len(old_ids - seen),
+                    "overlap": len(seen & starred_ids)}
 
     def import_lists(self, lists: list[dict]) -> int:
         """Keep GitHub Lists as reference material for the new local taxonomy."""
@@ -228,7 +295,7 @@ class Store:
         with self.connection() as db:
             rows = [dict(row) for row in db.execute("SELECT id,name,parent_id AS parent,color,source,github_id FROM categories ORDER BY rowid")]
             counts = {row["category_id"]: row["n"] for row in db.execute(
-                "SELECT category_id,COUNT(*) n FROM repo_categories rc JOIN repos r ON r.id=rc.repo_id WHERE r.is_starred=1 GROUP BY category_id"
+                "SELECT category_id,COUNT(*) n FROM repo_categories rc JOIN repos r ON r.id=rc.repo_id WHERE r.is_starred=1 OR r.is_owned=1 GROUP BY category_id"
             )}
         for row in rows:
             row["count"] = counts.get(row["id"], 0)
@@ -236,12 +303,12 @@ class Store:
 
     def repos(self) -> list[dict]:
         with self.connection() as db:
-            rows = [dict(row) for row in db.execute("SELECT * FROM repos WHERE is_starred=1 ORDER BY starred_at DESC,id")]
+            rows = [dict(row) for row in db.execute("SELECT * FROM repos WHERE is_starred=1 OR is_owned=1 ORDER BY starred_at DESC,id")]
             memberships: dict[str, list[str]] = {}
             tags: dict[str, list[str]] = {}
-            for row in db.execute("SELECT rc.repo_id,rc.category_id FROM repo_categories rc JOIN repos r ON r.id=rc.repo_id WHERE r.is_starred=1"):
+            for row in db.execute("SELECT rc.repo_id,rc.category_id FROM repo_categories rc JOIN repos r ON r.id=rc.repo_id WHERE r.is_starred=1 OR r.is_owned=1"):
                 memberships.setdefault(row["repo_id"], []).append(row["category_id"])
-            for row in db.execute("SELECT rt.repo_id,rt.tag FROM repo_tags rt JOIN repos r ON r.id=rt.repo_id WHERE r.is_starred=1"):
+            for row in db.execute("SELECT rt.repo_id,rt.tag FROM repo_tags rt JOIN repos r ON r.id=rt.repo_id WHERE r.is_starred=1 OR r.is_owned=1"):
                 tags.setdefault(row["repo_id"], []).append(row["tag"])
         result = []
         for row in rows:
@@ -255,19 +322,21 @@ class Store:
                 "categories": memberships.get(full_name, []), "tags": tags.get(full_name, []),
                 "notes": row["note"], "readme_status": row["readme_status"],
                 "default_branch": row["default_branch"],
+                "created": row["created_at"], "private": bool(row["is_private"]),
+                "is_starred": bool(row["is_starred"]), "is_owned": bool(row["is_owned"]),
                 "new_since_sync": bool(row["new_since_sync"]), "archived": bool(row["archived"]),
             })
         return result
 
     def repo(self, repo_id: str) -> dict | None:
         with self.connection() as db:
-            row = db.execute("SELECT * FROM repos WHERE id=? AND is_starred=1", (repo_id,)).fetchone()
+            row = db.execute("SELECT * FROM repos WHERE id=? AND (is_starred=1 OR is_owned=1)", (repo_id,)).fetchone()
             return dict(row) if row else None
 
     def readme_pending(self, retry_errors: bool = True) -> list[str]:
         with self.connection() as db:
             statuses = "('pending','error')" if retry_errors else "('pending')"
-            return [r[0] for r in db.execute(f"SELECT id FROM repos WHERE is_starred=1 AND readme_status IN {statuses} ORDER BY starred_at DESC")]
+            return [r[0] for r in db.execute(f"SELECT id FROM repos WHERE (is_starred=1 OR is_owned=1) AND readme_status IN {statuses} ORDER BY starred_at DESC")]
 
     def set_readme(self, repo_id: str, content: str | None, status: str) -> None:
         with self.connection() as db:
@@ -275,7 +344,7 @@ class Store:
 
     def set_note(self, repo_id: str, note: str) -> None:
         with self.connection() as db:
-            if not db.execute("SELECT 1 FROM repos WHERE id=? AND is_starred=1", (repo_id,)).fetchone():
+            if not db.execute("SELECT 1 FROM repos WHERE id=? AND (is_starred=1 OR is_owned=1)", (repo_id,)).fetchone():
                 raise KeyError(repo_id)
             db.execute("UPDATE repos SET note=? WHERE id=?", (note, repo_id))
 
@@ -285,7 +354,7 @@ class Store:
             if any(x not in known for x in category_ids):
                 raise ValueError("未知分类")
             for repo_id in repo_ids:
-                if not db.execute("SELECT 1 FROM repos WHERE id=? AND is_starred=1", (repo_id,)).fetchone():
+                if not db.execute("SELECT 1 FROM repos WHERE id=? AND (is_starred=1 OR is_owned=1)", (repo_id,)).fetchone():
                     raise KeyError(repo_id)
                 db.execute("INSERT INTO manual_category_edits(repo_id,edited_at) VALUES(?,?) "
                            "ON CONFLICT(repo_id) DO UPDATE SET edited_at=excluded.edited_at",
@@ -319,7 +388,7 @@ class Store:
     def set_tags(self, repo_id: str, tags: list[str]) -> None:
         clean = list(dict.fromkeys(tag.strip()[:40] for tag in tags if tag.strip()))
         with self.connection() as db:
-            if not db.execute("SELECT 1 FROM repos WHERE id=? AND is_starred=1", (repo_id,)).fetchone():
+            if not db.execute("SELECT 1 FROM repos WHERE id=? AND (is_starred=1 OR is_owned=1)", (repo_id,)).fetchone():
                 raise KeyError(repo_id)
             db.execute("DELETE FROM repo_tags WHERE repo_id=?", (repo_id,))
             db.executemany("INSERT INTO repo_tags(repo_id,tag) VALUES(?,?)", [(repo_id, tag) for tag in clean])
@@ -375,7 +444,7 @@ class Store:
             return set()
         pattern = "%" + query.lower().replace("%", "\\%").replace("_", "\\_") + "%"
         with self.connection() as db:
-            return {r[0] for r in db.execute("SELECT id FROM repos WHERE is_starred=1 AND lower(coalesce(readme,'')) LIKE ? ESCAPE '\\'", (pattern,))}
+            return {r[0] for r in db.execute("SELECT id FROM repos WHERE (is_starred=1 OR is_owned=1) AND lower(coalesce(readme,'')) LIKE ? ESCAPE '\\'", (pattern,))}
 
     def clear_new_badges(self) -> None:
         with self.connection() as db:
@@ -519,4 +588,86 @@ class Store:
                 raise ValueError("未分类复核任务已被替换")
             db.execute("DELETE FROM settings WHERE key='unclassified_review_run'")
             db.execute("INSERT INTO settings(key,value) VALUES('unclassified_review_completed',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (now(),))
+
+    def begin_owned_review(self) -> str:
+        """Queue new or changed owned repositories for a resumable classification pass."""
+        with self.connection() as db:
+            active = db.execute("SELECT value FROM settings WHERE key='owned_review_run'").fetchone()
+            if active:
+                return active[0]
+            total = db.execute(
+                """SELECT COUNT(*) FROM repos r LEFT JOIN owned_reviews o ON o.repo_id=r.id
+                   WHERE r.is_owned=1 AND (o.repo_id IS NULL OR o.pushed_at<>r.pushed_at
+                     OR o.readme_status<>r.readme_status)"""
+            ).fetchone()[0]
+            if not total:
+                return ""
+            run_id = uuid.uuid4().hex
+            started = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+            db.execute("INSERT INTO settings(key,value) VALUES('owned_review_run',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (run_id,))
+            db.execute("INSERT INTO settings(key,value) VALUES('owned_review_total',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (str(total),))
+            db.execute("INSERT INTO settings(key,value) VALUES('owned_review_started',?) "
+                       "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (started,))
+            return run_id
+
+    def owned_review_candidates(self, run_id: str) -> list[dict]:
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT r.id,r.description,r.language,r.topics,r.readme,r.readme_status
+                   FROM repos r LEFT JOIN owned_reviews o ON o.repo_id=r.id
+                   WHERE r.is_owned=1 AND (o.repo_id IS NULL OR o.pushed_at<>r.pushed_at
+                     OR o.readme_status<>r.readme_status)
+                   ORDER BY r.pushed_at DESC,r.id"""
+            ).fetchall()
+            result = []
+            for row in rows:
+                item = {**dict(row), "topics": json.loads(row["topics"])}
+                item["existing"] = [dict(cat) for cat in db.execute(
+                    """SELECT c.id,c.name FROM repo_categories rc JOIN categories c ON c.id=rc.category_id
+                       WHERE rc.repo_id=? ORDER BY c.name""", (row["id"],))]
+                result.append(item)
+            return result
+
+    def apply_owned_review_batch(self, run_id: str, choices: dict[str, list[str]]) -> int:
+        """Add clear new categories while preserving earlier labels and concurrent edits."""
+        assigned = 0
+        with self.connection() as db:
+            active = db.execute("SELECT value FROM settings WHERE key='owned_review_run'").fetchone()
+            if not active or active[0] != run_id:
+                raise ValueError("我的项目分类任务已被替换")
+            started = db.execute("SELECT value FROM settings WHERE key='owned_review_started'").fetchone()[0]
+            allowed = {row[0] for row in db.execute("SELECT id FROM categories WHERE parent_id IS NOT NULL")}
+            for repo_id, category_ids in choices.items():
+                if not isinstance(category_ids, list) or len(category_ids) > 3 or any(
+                    not isinstance(cat, str) or cat not in allowed for cat in category_ids
+                ):
+                    raise ValueError(f"分类结果包含无效类别：{repo_id}")
+                repo = db.execute("SELECT pushed_at,readme_status FROM repos WHERE id=? AND is_owned=1", (repo_id,)).fetchone()
+                if not repo:
+                    raise KeyError(repo_id)
+                manual = db.execute("SELECT edited_at FROM manual_category_edits WHERE repo_id=?", (repo_id,)).fetchone()
+                if not manual or manual[0] <= started:
+                    existing = {row[0] for row in db.execute(
+                        "SELECT category_id FROM repo_categories WHERE repo_id=?", (repo_id,))}
+                    additions = [cat for cat in dict.fromkeys(category_ids) if cat not in existing]
+                    db.executemany("INSERT INTO repo_categories(repo_id,category_id) VALUES(?,?)",
+                                   [(repo_id, cat) for cat in additions])
+                    assigned += bool(additions)
+                db.execute("INSERT INTO owned_reviews(repo_id,run_id,pushed_at,readme_status,reviewed_at) VALUES(?,?,?,?,?) "
+                           "ON CONFLICT(repo_id) DO UPDATE SET run_id=excluded.run_id,"
+                           "pushed_at=excluded.pushed_at,readme_status=excluded.readme_status,"
+                           "reviewed_at=excluded.reviewed_at",
+                           (repo_id, run_id, repo["pushed_at"], repo["readme_status"], now()))
+        return assigned
+
+    def finish_owned_review(self, run_id: str) -> None:
+        with self.connection() as db:
+            active = db.execute("SELECT value FROM settings WHERE key='owned_review_run'").fetchone()
+            if not active or active[0] != run_id:
+                raise ValueError("我的项目分类任务已被替换")
+            db.execute("DELETE FROM settings WHERE key='owned_review_run'")
+            db.execute("INSERT INTO settings(key,value) VALUES('owned_review_completed',?) "
                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (now(),))

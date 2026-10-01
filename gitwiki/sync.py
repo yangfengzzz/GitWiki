@@ -8,7 +8,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
-from .classifier import classify_locally, classify_with_codex, reclassify_all_with_codex, review_unclassified_with_codex
+from .classifier import classify_locally, classify_with_codex, reclassify_all_with_codex, review_unclassified_with_codex, review_owned_with_codex
 from .github import GitHubClient, GitHubError
 from .store import Store, now
 
@@ -44,6 +44,14 @@ class SyncManager:
         threading.Thread(target=self._run, daemon=True, name="gitwiki-sync").start()
         return True
 
+    def start_owned(self) -> bool:
+        with self.lock:
+            if self.sync.running:
+                return False
+            self.sync = Job(True, "owned", message="正在读取我的项目")
+        threading.Thread(target=self._run_owned, daemon=True, name="gitwiki-owned-sync").start()
+        return True
+
     def _set(self, which: str, **changes) -> None:
         with self.lock:
             job = getattr(self, which)
@@ -65,15 +73,39 @@ class SyncManager:
             if not self.store.setting("taxonomy_version"):
                 taxonomy = json.loads((Path(__file__).resolve().parent.parent / "taxonomy.json").read_text())
                 self.store.replace_taxonomy(taxonomy["groups"])
+            self._set("sync", phase="owned", current=0, total=0, message="正在读取我的项目")
+            owned = self.client.fetch_owned_repos(
+                viewer["login"], lambda n: self._set("sync", current=n, message=f"已读取 {n} 个我的项目"))
+            owned_result = self.store.replace_owned_repos(owned)
+            self.store.set_setting("last_owned_sync", now())
+            self.store.begin_owned_review()
             self.store.set_setting("last_sync", now())
-            self._set("sync", running=False, phase="complete", current=result["total"], total=result["total"],
-                      message=f"同步完成：{result['total']} 个 Star，新增 {result['new']} 个")
+            self._set("sync", running=False, phase="complete", current=result["total"] + owned_result["total"],
+                      total=result["total"] + owned_result["total"],
+                      message=f"同步完成：{result['total']} 个 Star、{owned_result['total']} 个我的项目")
             self.start_readmes()
-            if (self.store.setting("unclassified_review_run") or self.store.setting("full_classification_run")
-                    or not self.store.setting("initial_classified")):
+            if (not self.store.setting("owned_review_run") and
+                    (self.store.setting("unclassified_review_run") or self.store.setting("full_classification_run")
+                     or not self.store.setting("initial_classified"))):
                 self.start_classification()
         except Exception as exc:
             self._set("sync", running=False, phase="error", error=str(exc), message="同步失败")
+
+    def _run_owned(self) -> None:
+        try:
+            viewer = self.client.viewer()
+            username = viewer["login"]
+            self.store.set_setting("username", username)
+            repos = self.client.fetch_owned_repos(
+                username, lambda n: self._set("sync", current=n, message=f"已读取 {n} 个我的项目"))
+            result = self.store.replace_owned_repos(repos)
+            self.store.set_setting("last_owned_sync", now())
+            self.store.begin_owned_review()
+            self._set("sync", running=False, phase="complete", current=result["total"], total=result["total"],
+                      message=f"我的项目同步完成：{result['total']} 个，资料库新增 {result['added']} 个，合并已有 Star {result['overlap']} 个")
+            self.start_readmes()
+        except Exception as exc:
+            self._set("sync", running=False, phase="error", error=str(exc), message="我的项目同步失败")
 
     def start_readmes(self) -> bool:
         with self.lock:
@@ -86,6 +118,8 @@ class SyncManager:
     def _run_readmes(self) -> None:
         try:
             self._cache_readmes()
+            if self.readmes.phase == "complete" and self.store.setting("owned_review_run"):
+                self.start_classification()
         except Exception as exc:
             self._set("readmes", running=False, phase="error", error=str(exc),
                       message="README 缓存出错，可重新启动")
@@ -143,8 +177,9 @@ class SyncManager:
                 return False
             targeted = bool(self.store.setting("unclassified_review_run"))
             full = bool(self.store.setting("full_classification_run"))
-            phase = "unclassified-review" if targeted else "full-codex" if full else "local"
-            message = ("正在复核未分类项目" if targeted else
+            owned = bool(self.store.setting("owned_review_run"))
+            phase = "owned-review" if owned else "unclassified-review" if targeted else "full-codex" if full else "local"
+            message = ("正在分类我的项目" if owned else "正在复核未分类项目" if targeted else
                        "正在重新阅读全部 README 并分类" if full else "正在整理初始收藏")
             self.classification = Job(True, phase, message=message)
         threading.Thread(target=self._run_classification, daemon=True, name="gitwiki-classify").start()
@@ -152,6 +187,15 @@ class SyncManager:
 
     def _run_classification(self) -> None:
         try:
+            if self.store.setting("owned_review_run"):
+                count = review_owned_with_codex(
+                    self.store,
+                    lambda n, total: self._set("classification", current=n, total=total,
+                                               message=f"已分类我的项目 {n}/{total}"),
+                )
+                self._set("classification", running=False, phase="complete", current=count, total=count,
+                          message=f"我的项目分类完成：已检查 {count} 个项目")
+                return
             if self.store.setting("unclassified_review_run"):
                 count = review_unclassified_with_codex(
                     self.store,

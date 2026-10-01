@@ -80,11 +80,13 @@ class Handler(BaseHTTPRequestHandler):
                     "username": STORE.setting("username"),
                     "connected": bool(CLIENT.token),
                     "last_sync": STORE.setting("last_sync"),
+                    "last_owned_sync": STORE.setting("last_owned_sync"),
                     "jobs": SYNC.status(),
                     "count": len(repos),
                 })
             elif parsed.path == "/api/status":
                 self.json(200, {"jobs": SYNC.status(), "last_sync": STORE.setting("last_sync"),
+                                "last_owned_sync": STORE.setting("last_owned_sync"),
                                 "connected": bool(CLIENT.token), "username": STORE.setting("username")})
             elif parsed.path == "/api/readme":
                 repo_id = (query.get("id") or [""])[0]
@@ -135,6 +137,11 @@ class Handler(BaseHTTPRequestHandler):
                     self.json(401, {"error": "请先连接 GitHub"})
                     return
                 self.json(202, {"started": SYNC.start(), "jobs": SYNC.status()})
+            elif path == "/api/sync-owned":
+                if not CLIENT.token:
+                    self.json(401, {"error": "请先连接 GitHub"})
+                    return
+                self.json(202, {"started": SYNC.start_owned(), "jobs": SYNC.status()})
             elif path == "/api/readmes":
                 self.json(202, {"started": SYNC.start_readmes()})
             elif path == "/api/classify":
@@ -186,9 +193,11 @@ def main():
     print(f"GitWiki: http://127.0.0.1:{args.port}/", flush=True)
     print("GitHub login:", "available" if CLIENT.token else "not found", flush=True)
     if STORE.setting("last_sync"):
-        if CLIENT.token and STORE.readme_pending():
+        pending_readmes = CLIENT.token and STORE.readme_pending()
+        if pending_readmes:
             SYNC.start_readmes()
-        if (STORE.setting("unclassified_review_run") or STORE.setting("full_classification_run")
+        if ((STORE.setting("owned_review_run") and not pending_readmes)
+                or STORE.setting("unclassified_review_run") or STORE.setting("full_classification_run")
                 or (CLIENT.token and not STORE.setting("initial_classified"))):
             SYNC.start_classification()
     try:

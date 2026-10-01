@@ -6,8 +6,9 @@ import types
 from pathlib import Path
 from unittest.mock import patch
 
-from gitwiki.classifier import classify_locally, classify_with_codex, reclassify_all_with_codex, review_unclassified_with_codex
-from gitwiki.store import Store
+from gitwiki.classifier import classify_locally, classify_with_codex, reclassify_all_with_codex, review_unclassified_with_codex, review_owned_with_codex
+from gitwiki.github import GitHubClient
+from gitwiki.store import Store, now
 from gitwiki.sync import SyncManager
 
 
@@ -15,6 +16,13 @@ def star(name, description="", topics=None, starred_at="2026-01-01T00:00:00Z", p
     return {"starred_at": starred_at, "repo": {"full_name": name, "id": abs(hash(name)) % 1000000,
             "description": description, "language": "Python", "stargazers_count": 7,
             "pushed_at": pushed_at, "topics": topics or [], "default_branch": "main"}}
+
+
+def owned(name, description="", pushed_at="2026-01-02T00:00:00Z", private=False):
+    return {"full_name": name, "id": abs(hash(name)) % 1000000,
+            "description": description, "language": "Python", "stargazers_count": 7,
+            "pushed_at": pushed_at, "created_at": "2025-12-01T00:00:00Z",
+            "topics": [], "default_branch": "main", "private": private}
 
 
 class StoreFlowTest(unittest.TestCase):
@@ -47,6 +55,61 @@ class StoreFlowTest(unittest.TestCase):
         removed = store.replace_stars([star("owner/two")])
         self.assertEqual(removed["removed"], 1)
         self.assertEqual([item["id"] for item in store.repos()], ["owner/two"])
+
+    def test_owned_sync_merges_starred_repos_without_losing_annotations(self):
+        store = self.store
+        store.replace_stars([star("me/shared")])
+        category = store.create_category("Robotics")
+        store.set_categories(["me/shared"], [category["id"]])
+        store.set_note("me/shared", "keep my note")
+        store.set_readme("me/shared", "# Shared", "ready")
+        result = store.replace_owned_repos([owned("me/shared"), owned("me/private", private=True)])
+        self.assertEqual(result, {"total": 2, "new": 2, "added": 1, "removed": 0, "overlap": 1})
+        repos = {item["id"]: item for item in store.repos()}
+        self.assertEqual(len(repos), 2)
+        self.assertTrue(repos["me/shared"]["is_starred"] and repos["me/shared"]["is_owned"])
+        self.assertEqual(repos["me/shared"]["categories"], [category["id"]])
+        self.assertEqual(repos["me/shared"]["notes"], "keep my note")
+        self.assertEqual(repos["me/shared"]["readme_status"], "ready")
+        self.assertTrue(repos["me/private"]["private"])
+        self.assertFalse(repos["me/private"]["is_starred"])
+        store.set_note("me/private", "private note")
+        store.replace_owned_repos([owned("me/shared")])
+        self.assertEqual([item["id"] for item in store.repos()], ["me/shared"])
+        store.replace_stars([])
+        self.assertEqual([item["id"] for item in store.repos()], ["me/shared"])
+        self.assertFalse(store.repos()[0]["is_starred"])
+        store.replace_owned_repos([owned("me/shared", pushed_at="2026-02-01T00:00:00Z")])
+        self.assertEqual(store.repo("me/shared")["readme_status"], "pending")
+
+    def test_owned_review_migration_keeps_completed_readme_review(self):
+        self.store.replace_owned_repos([owned("me/project")])
+        self.store.set_readme("me/project", "# Project", "ready")
+        with self.store.connection() as db:
+            db.execute(
+                "INSERT INTO owned_reviews(repo_id,run_id,pushed_at,readme_status,reviewed_at) "
+                "VALUES(?,?,?,?,?)",
+                ("me/project", "previous", "2026-01-02T00:00:00Z", "", now()),
+            )
+        reopened = Store(self.store.path)
+        self.assertEqual(reopened.begin_owned_review(), "")
+
+    def test_owned_api_paginates_and_excludes_organization_repos(self):
+        client = GitHubClient(token="test")
+        pages = []
+
+        def rest(path):
+            pages.append(path)
+            if "page=1&" in path:
+                return [{"owner": {"login": "me"}, "full_name": f"me/repo-{i}"} for i in range(99)] + [
+                    {"owner": {"login": "an-org"}, "full_name": "an-org/repo"}]
+            return [{"owner": {"login": "me"}, "full_name": "me/last"}]
+
+        client.rest = rest
+        result = client.fetch_owned_repos("me")
+        self.assertEqual(len(result), 100)
+        self.assertEqual(len(pages), 2)
+        self.assertTrue(all(repo["full_name"].startswith("me/") for repo in result))
 
     def test_old_lists_are_reference_only_and_new_stars_stay_in_inbox(self):
         store = self.store
@@ -236,6 +299,47 @@ class StoreFlowTest(unittest.TestCase):
         store.set_categories(["owner/one"], [manual["id"]])
         self.assertEqual(store.apply_unclassified_review_batch(run_id, {"owner/one": [proposed["id"]]}), 0)
         self.assertEqual(store.repos()[0]["categories"], [manual["id"]])
+
+    def test_owned_review_uses_readme_and_adds_to_existing_categories(self):
+        store = self.store
+        store.replace_stars([star("me/shared")])
+        store.replace_owned_repos([owned("me/shared"), owned("me/robot")])
+        root = store.create_category("Robotics")
+        platform = store.create_category("Platform", root["id"])
+        navigation = store.create_category("Navigation", root["id"])
+        store.set_categories(["me/shared"], [platform["id"]])
+        store.set_readme("me/shared", "# Robot platform\nSupports autonomous navigation.", "ready")
+        store.set_readme("me/robot", "# Navigation\nAutonomous robot navigation.", "ready")
+        run_id = store.begin_owned_review()
+        prompts = []
+
+        class FakeThread:
+            def run(self, prompt):
+                prompts.append(prompt)
+                choices = {}
+                for repo_id in ("me/shared", "me/robot"):
+                    if f'"id": "{repo_id}"' in prompt:
+                        choices[repo_id] = [navigation["id"]]
+                return types.SimpleNamespace(final_response=json.dumps(choices))
+
+        class FakeCodex:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def thread_start(self, sandbox): return FakeThread()
+
+        fake_module = types.SimpleNamespace(Codex=FakeCodex, Sandbox=types.SimpleNamespace(read_only="read_only"))
+        with patch.dict(sys.modules, {"openai_codex": fake_module}):
+            self.assertEqual(review_owned_with_codex(store, batch_size=1, max_items=1), 1)
+            self.assertEqual(len(store.owned_review_candidates(run_id)), 1)
+            self.assertEqual(review_owned_with_codex(store, batch_size=1), 2)
+        repos = {item["id"]: item for item in store.repos()}
+        self.assertEqual(set(repos["me/shared"]["categories"]), {platform["id"], navigation["id"]})
+        self.assertEqual(repos["me/robot"]["categories"], [navigation["id"]])
+        self.assertIn("Supports autonomous navigation", "\n".join(prompts))
+        self.assertEqual(store.setting("owned_review_run"), "")
+        self.assertEqual(store.begin_owned_review(), "")
+        store.set_readme("me/robot", None, "missing")
+        self.assertTrue(store.begin_owned_review())
 
 
 if __name__ == "__main__":

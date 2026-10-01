@@ -124,6 +124,25 @@ class GitHubClient:
                 return stars
             page += 1
 
+    def fetch_owned_repos(self, username: str,
+                          progress: Callable[[int], None] | None = None) -> list[dict]:
+        """List all repositories personally owned by the authenticated user."""
+        repos: list[dict] = []
+        page = 1
+        while True:
+            result = self.rest(
+                f"/user/repos?affiliation=owner&visibility=all&per_page=100&page={page}&sort=updated&direction=desc"
+            )
+            if not isinstance(result, list):
+                raise GitHubError("我的项目接口返回了意外的数据格式")
+            repos.extend(item for item in result if
+                         item.get("owner", {}).get("login", "").casefold() == username.casefold())
+            if progress:
+                progress(len(repos))
+            if len(result) < 100:
+                return repos
+            page += 1
+
     def fetch_lists(self, progress: Callable[[int, int], None] | None = None) -> list[dict]:
         lists: list[dict] = []
         cursor = None
