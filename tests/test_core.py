@@ -194,7 +194,9 @@ class StoreFlowTest(unittest.TestCase):
         class FakeCodex:
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def thread_start(self, sandbox): return FakeThread()
+            def thread_start(self, sandbox, ephemeral):
+                assert ephemeral is True
+                return FakeThread()
 
         fake_module = types.SimpleNamespace(Codex=FakeCodex, Sandbox=types.SimpleNamespace(read_only="read_only"))
         with patch.dict(sys.modules, {"openai_codex": fake_module}):
@@ -237,7 +239,9 @@ class StoreFlowTest(unittest.TestCase):
         class FakeCodex:
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def thread_start(self, sandbox): return FakeThread()
+            def thread_start(self, sandbox, ephemeral):
+                assert ephemeral is True
+                return FakeThread()
 
         fake_module = types.SimpleNamespace(Codex=FakeCodex, Sandbox=types.SimpleNamespace(read_only="read_only"))
         with patch.dict(sys.modules, {"openai_codex": fake_module}):
@@ -291,7 +295,9 @@ class StoreFlowTest(unittest.TestCase):
         class FakeCodex:
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def thread_start(self, sandbox): return FakeThread()
+            def thread_start(self, sandbox, ephemeral):
+                assert ephemeral is True
+                return FakeThread()
 
         fake_module = types.SimpleNamespace(Codex=FakeCodex, Sandbox=types.SimpleNamespace(read_only="read_only"))
         with patch.dict(sys.modules, {"openai_codex": fake_module}):
@@ -342,7 +348,9 @@ class StoreFlowTest(unittest.TestCase):
         class FakeCodex:
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def thread_start(self, sandbox): return FakeThread()
+            def thread_start(self, sandbox, ephemeral):
+                assert ephemeral is True
+                return FakeThread()
 
         fake_module = types.SimpleNamespace(Codex=FakeCodex, Sandbox=types.SimpleNamespace(read_only="read_only"))
         with patch.dict(sys.modules, {"openai_codex": fake_module}):

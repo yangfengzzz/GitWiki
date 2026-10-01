@@ -136,7 +136,7 @@ def reclassify_all_with_codex(store: Store,
                 "仓库资料：" + json.dumps(evidence, ensure_ascii=False)
             )
             for attempt in range(2):
-                thread = codex.thread_start(sandbox=Sandbox.read_only)
+                thread = codex.thread_start(sandbox=Sandbox.read_only, ephemeral=True)
                 result = thread.run(prompt + ("\n上次结果缺失或无效；请包含每个仓库且只使用目录 ID。" if attempt else ""))
                 try:
                     choices = _json_response(result.final_response or "")
@@ -203,7 +203,7 @@ def review_unclassified_with_codex(store: Store,
                 "仓库资料：" + json.dumps(evidence, ensure_ascii=False)
             )
             for attempt in range(2):
-                thread = codex.thread_start(sandbox=Sandbox.read_only)
+                thread = codex.thread_start(sandbox=Sandbox.read_only, ephemeral=True)
                 result = thread.run(prompt + ("\n上次结果缺失或无效；请包含每个仓库且只使用目录 ID。" if attempt else ""))
                 try:
                     choices = _json_response(result.final_response or "")
@@ -273,7 +273,7 @@ def review_owned_with_codex(store: Store,
                 "仓库资料：" + json.dumps(evidence, ensure_ascii=False)
             )
             for attempt in range(2):
-                thread = codex.thread_start(sandbox=Sandbox.read_only)
+                thread = codex.thread_start(sandbox=Sandbox.read_only, ephemeral=True)
                 result = thread.run(prompt + ("\n上次结果缺失或无效；请包含每个仓库且只使用目录 ID。" if attempt else ""))
                 try:
                     choices = _json_response(result.final_response or "")
@@ -336,7 +336,7 @@ def classify_with_codex(store: Store, client: GitHubClient,
                 "仓库：" + json.dumps(evidence, ensure_ascii=False)
             )
             for attempt in range(2):
-                thread = codex.thread_start(sandbox=Sandbox.read_only)
+                thread = codex.thread_start(sandbox=Sandbox.read_only, ephemeral=True)
                 result = thread.run(prompt + ("\n上一次输出不完整；请确保包含全部仓库且 JSON 可以解析。" if attempt else ""))
                 try:
                     choices = _json_response(result.final_response or "")
